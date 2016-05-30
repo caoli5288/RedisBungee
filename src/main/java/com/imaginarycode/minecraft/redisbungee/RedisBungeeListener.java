@@ -31,8 +31,8 @@ import java.util.*;
 @AllArgsConstructor
 public class RedisBungeeListener implements Listener {
     private static final BaseComponent[] ALREADY_LOGGED_IN =
-            new ComponentBuilder("You are already logged on to this server.").color(ChatColor.RED)
-                    .append("\n\nIt may help to try logging in again in a few minutes.\nIf this does not resolve your issue, please contact staff.")
+            new ComponentBuilder("帐号已在线，如果您之前退出了游戏请稍等5秒再登录游戏！").color(ChatColor.RED)
+                    .append("\n\n如果您是新玩家请更换游戏昵称再次尝试登录！\n更多信息请前往官网查看！\nwww.i5mc.com")
                     .color(ChatColor.GRAY)
                     .create();
     private static final BaseComponent[] ONLINE_MODE_RECONNECT =
