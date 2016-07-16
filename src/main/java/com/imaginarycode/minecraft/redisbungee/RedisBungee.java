@@ -2,11 +2,15 @@ package com.imaginarycode.minecraft.redisbungee;
 
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.gson.Gson;
 import com.imaginarycode.minecraft.redisbungee.events.PubSubMessageEvent;
-import com.imaginarycode.minecraft.redisbungee.util.*;
+import com.imaginarycode.minecraft.redisbungee.util.IOUtil;
+import com.imaginarycode.minecraft.redisbungee.util.LuaManager;
 import com.imaginarycode.minecraft.redisbungee.util.uuid.NameFetcher;
 import com.imaginarycode.minecraft.redisbungee.util.uuid.UUIDFetcher;
 import com.imaginarycode.minecraft.redisbungee.util.uuid.UUIDTranslator;
@@ -19,17 +23,39 @@ import lombok.NonNull;
 import net.md_5.bungee.api.ProxyServer;
 import net.md_5.bungee.api.connection.ProxiedPlayer;
 import net.md_5.bungee.api.plugin.Plugin;
-import net.md_5.bungee.api.scheduler.ScheduledTask;
 import net.md_5.bungee.config.Configuration;
 import net.md_5.bungee.config.ConfigurationProvider;
 import net.md_5.bungee.config.YamlConfiguration;
-import redis.clients.jedis.*;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
+import redis.clients.jedis.JedisPubSub;
+import redis.clients.jedis.Pipeline;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Field;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
@@ -406,8 +432,9 @@ public final class RedisBungee extends Plugin {
         final String redisServer = configuration.getString("redis-server", "localhost");
         final int redisPort = configuration.getInt("redis-port", 6379);
         String redisPassword = configuration.getString("redis-password");
-        String serverId = UUID.randomUUID().toString().split("-")[0];
 
+        String serverId = UUID.randomUUID().toString().split("-")[0];
+        configuration.set("server-id", serverId);
         getLogger().info("Random server id " + serverId);
 
         if (redisPassword != null && (redisPassword.isEmpty() || redisPassword.equals("none"))) {
