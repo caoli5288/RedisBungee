@@ -406,7 +406,9 @@ public final class RedisBungee extends Plugin {
         final String redisServer = configuration.getString("redis-server", "localhost");
         final int redisPort = configuration.getInt("redis-port", 6379);
         String redisPassword = configuration.getString("redis-password");
-        String serverId = configuration.getString("server-id");
+        String serverId = UUID.randomUUID().toString().split("-")[0];
+
+        getLogger().info("Random server id " + serverId);
 
         if (redisPassword != null && (redisPassword.isEmpty() || redisPassword.equals("none"))) {
             redisPassword = null;
