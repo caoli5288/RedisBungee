@@ -81,7 +81,7 @@ public class DataManager implements Listener {
         ProxiedPlayer player = plugin.getProxy().getPlayer(uuid);
 
         if (player != null)
-            return RedisBungee.getConfiguration().getServerId();
+            return RedisBungee.getConfiguration().getId();
 
         try {
             return proxyCache.get(uuid, new Callable<String>() {
@@ -177,7 +177,7 @@ public class DataManager implements Listener {
 
         String source = jsonObject.get("source").getAsString();
 
-        if (source.equals(RedisBungee.getConfiguration().getServerId()))
+        if (source.equals(RedisBungee.getConfiguration().getId()))
             return;
 
         DataManagerMessage.Action action = DataManagerMessage.Action.valueOf(jsonObject.get("action").getAsString());

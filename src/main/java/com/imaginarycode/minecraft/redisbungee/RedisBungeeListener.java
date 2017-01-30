@@ -18,7 +18,12 @@ import net.md_5.bungee.api.chat.TextComponent;
 import net.md_5.bungee.api.config.ServerInfo;
 import net.md_5.bungee.api.connection.ProxiedPlayer;
 import net.md_5.bungee.api.connection.Server;
-import net.md_5.bungee.api.event.*;
+import net.md_5.bungee.api.event.LoginEvent;
+import net.md_5.bungee.api.event.PlayerDisconnectEvent;
+import net.md_5.bungee.api.event.PluginMessageEvent;
+import net.md_5.bungee.api.event.PostLoginEvent;
+import net.md_5.bungee.api.event.ProxyPingEvent;
+import net.md_5.bungee.api.event.ServerConnectedEvent;
 import net.md_5.bungee.api.plugin.Listener;
 import net.md_5.bungee.event.EventHandler;
 import net.md_5.bungee.event.EventPriority;
@@ -26,7 +31,14 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.Pipeline;
 
 import java.net.InetAddress;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 @AllArgsConstructor
 public class RedisBungeeListener implements Listener {
@@ -67,8 +79,19 @@ public class RedisBungeeListener implements Listener {
                         }
                     }
 
-                    for (String s : plugin.getServerIds()) {
-                        if (jedis.sismember("proxy:" + s + ":usersOnline", event.getConnection().getUniqueId().toString())) {
+                    String key;
+                    String value;
+
+                    if (plugin.getProxy().getConfig().isOnlineMode()) {
+                        key = "proxy:%s:usersOnline";
+                        value = event.getConnection().getUniqueId().toString();
+                    } else {
+                        key = "proxy:%s:all";
+                        value = event.getConnection().getName().toLowerCase();
+                    }
+
+                    for (String id : plugin.getServerIds()) {
+                        if (jedis.sismember(String.format(key, id), value)) {
                             event.setCancelled(true);
                             // TODO: Make it accept a BaseComponent[] like everything else.
                             event.setCancelReason(TextComponent.toLegacyText(ALREADY_LOGGED_IN));
@@ -109,7 +132,7 @@ public class RedisBungeeListener implements Listener {
             @Override
             protected Void call(Jedis jedis) {
                 Pipeline pipeline = jedis.pipelined();
-                RedisUtil.cleanUpPlayer(event.getPlayer().getUniqueId().toString(), pipeline);
+                RedisUtil.cleanUpPlayer(event.getPlayer(), pipeline);
                 pipeline.sync();
                 return null;
             }
@@ -232,7 +255,7 @@ public class RedisBungeeListener implements Listener {
                             break;
                         case "Proxy":
                             out.writeUTF("Proxy");
-                            out.writeUTF(RedisBungee.getConfiguration().getServerId());
+                            out.writeUTF(RedisBungee.getConfiguration().getId());
                             break;
                         default:
                             return;

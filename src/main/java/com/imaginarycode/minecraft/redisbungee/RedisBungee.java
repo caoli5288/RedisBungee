@@ -9,6 +9,7 @@ import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.gson.Gson;
 import com.imaginarycode.minecraft.redisbungee.events.PubSubMessageEvent;
+import com.imaginarycode.minecraft.redisbungee.util.Base64;
 import com.imaginarycode.minecraft.redisbungee.util.IOUtil;
 import com.imaginarycode.minecraft.redisbungee.util.LuaManager;
 import com.imaginarycode.minecraft.redisbungee.util.uuid.NameFetcher;
@@ -45,6 +46,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -87,7 +89,6 @@ public final class RedisBungee extends Plugin {
     private final AtomicInteger globalPlayerCount = new AtomicInteger();
     private Future<?> integrityCheck;
     private Future<?> heartbeatTask;
-    private boolean usingLua;
     private LuaManager.Script serverToPlayersScript;
     private LuaManager.Script getPlayerCountScript;
 
@@ -139,7 +140,7 @@ public final class RedisBungee extends Plugin {
             return servers.build();
         } catch (JedisConnectionException e) {
             getLogger().log(Level.SEVERE, "Unable to fetch server IDs", e);
-            return Collections.singletonList(configuration.getServerId());
+            return Collections.singletonList(configuration.getId());
         }
     }
 
@@ -266,13 +267,13 @@ public final class RedisBungee extends Plugin {
             throw new RuntimeException("Unable to connect to your Redis server!", e);
         }
         if (pool != null) {
-            try (Jedis tmpRsc = pool.getResource()) {
+            try (Jedis j = pool.getResource()) {
                 // This is more portable than INFO <section>
-                String info = tmpRsc.info();
+                String info = j.info();
                 for (String s : info.split("\r\n")) {
                     if (s.startsWith("redis_version:")) {
                         String version = s.split(":")[1];
-                        if (!(usingLua = RedisUtil.canUseLua(version))) {
+                        if (!RedisUtil.canUseLua(version)) {
                             getLogger().warning("Your version of Redis (" + version + ") is not at least version 2.6. RedisBungee requires a newer version of Redis.");
                             throw new RuntimeException("Unsupported Redis version detected");
                         } else {
@@ -284,11 +285,17 @@ public final class RedisBungee extends Plugin {
                     }
                 }
 
-                tmpRsc.hset("heartbeats", configuration.getServerId(), String.valueOf(System.currentTimeMillis()));
+                j.hset("heartbeats", configuration.getId(), String.valueOf(System.currentTimeMillis()));
 
-                long uuidCacheSize = tmpRsc.hlen("uuid-cache");
+                long uuidCacheSize = j.hlen("uuid-cache");
                 if (uuidCacheSize > 750000) {
                     getLogger().info("Looks like you have a really big UUID cache! Run https://www.spigotmc.org/resources/redisbungeecleaner.8505/ as soon as possible.");
+                }
+
+                if (!getProxy().getConfig().isOnlineMode()) {
+                    String key = "proxy:" + configuration.getId() + ":all";
+                    Set<String> l = j.smembers(key);
+                    if (!l.isEmpty()) j.srem(key, l.toArray(new String[l.size()]));
                 }
             }
             serverIds = getCurrentServerIds(true, false);
@@ -298,7 +305,7 @@ public final class RedisBungee extends Plugin {
                 public void run() {
                     try (Jedis rsc = pool.getResource()) {
                         long redisTime = getRedisTime(rsc.time());
-                        rsc.hset("heartbeats", configuration.getServerId(), String.valueOf(redisTime));
+                        rsc.hset("heartbeats", configuration.getId(), String.valueOf(redisTime));
                     } catch (JedisConnectionException e) {
                         // Redis server has disappeared!
                         getLogger().log(Level.SEVERE, "Unable to update heartbeat - did your Redis server go away?", e);
@@ -335,7 +342,7 @@ public final class RedisBungee extends Plugin {
                 public void run() {
                     try (Jedis tmpRsc = pool.getResource()) {
                         Set<String> players = getLocalPlayersAsUuidStrings();
-                        Set<String> playersInRedis = tmpRsc.smembers("proxy:" + configuration.getServerId() + ":usersOnline");
+                        Set<String> playersInRedis = tmpRsc.smembers("proxy:" + configuration.getId() + ":usersOnline");
                         List<String> lagged = getCurrentServerIds(false, true);
 
                         // Clean up lagged players.
@@ -358,7 +365,7 @@ public final class RedisBungee extends Plugin {
                         for (String member : absentLocally) {
                             boolean found = false;
                             for (String proxyId : getServerIds()) {
-                                if (proxyId.equals(configuration.getServerId())) continue;
+                                if (proxyId.equals(configuration.getId())) continue;
                                 if (tmpRsc.sismember("proxy:" + proxyId + ":usersOnline", member)) {
                                     // Just clean up the set.
                                     found = true;
@@ -369,7 +376,7 @@ public final class RedisBungee extends Plugin {
                                 RedisUtil.cleanUpPlayer(member, tmpRsc);
                                 getLogger().warning("Player found in set that was not found locally and globally: " + member);
                             } else {
-                                tmpRsc.srem("proxy:" + configuration.getServerId() + ":usersOnline", member);
+                                tmpRsc.srem("proxy:" + configuration.getId() + ":usersOnline", member);
                                 getLogger().warning("Player found in set that was not found locally, but is on another proxy: " + member);
                             }
                         }
@@ -406,12 +413,17 @@ public final class RedisBungee extends Plugin {
             heartbeatTask.cancel(true);
             getProxy().getPluginManager().unregisterListeners(this);
 
-            try (Jedis tmpRsc = pool.getResource()) {
-                tmpRsc.hdel("heartbeats", configuration.getServerId());
-                if (tmpRsc.scard("proxy:" + configuration.getServerId() + ":usersOnline") > 0) {
-                    Set<String> players = tmpRsc.smembers("proxy:" + configuration.getServerId() + ":usersOnline");
+            try (Jedis j = pool.getResource()) {
+                j.hdel("heartbeats", configuration.getId());
+                if (j.scard("proxy:" + configuration.getId() + ":usersOnline") > 0) {
+                    Set<String> players = j.smembers("proxy:" + configuration.getId() + ":usersOnline");
                     for (String member : players)
-                        RedisUtil.cleanUpPlayer(member, tmpRsc);
+                        RedisUtil.cleanUpPlayer(member, j);
+                }
+                if (!getProxy().getConfig().isOnlineMode()) {
+                    String key = "proxy:" + configuration.getId() + ":all";
+                    Set<String> l = j.smembers(key);
+                    if (!l.isEmpty()) j.srem(key, l.toArray(new String[l.size()]));
                 }
             }
 
@@ -440,17 +452,18 @@ public final class RedisBungee extends Plugin {
         final int redisPort = configuration.getInt("redis-port", 6379);
         String redisPassword = configuration.getString("redis-password");
 
-        String serverId = UUID.randomUUID().toString().split("-")[0];
-        configuration.set("server-id", serverId);
-        getLogger().info("Random server id " + serverId);
+        String id = configuration.getString("id", "");
+        if (id.isEmpty()) {
+            Random rand = new Random();
+            byte[] buf = new byte[8];
+            rand.nextBytes(buf);
+            id = new String(Base64.encode(buf));
+            configuration.set("id", id);
+            ConfigurationProvider.getProvider(YamlConfiguration.class).save(configuration, file);
+        }
 
         if (redisPassword != null && (redisPassword.isEmpty() || redisPassword.equals("none"))) {
             redisPassword = null;
-        }
-
-        // Configuration sanity checks.
-        if (serverId == null || serverId.isEmpty()) {
-            throw new RuntimeException("server-id is not specified in the configuration or is empty");
         }
 
         if (redisServer != null && !redisServer.isEmpty()) {
@@ -480,9 +493,9 @@ public final class RedisBungee extends Plugin {
                 File crashFile = new File(getDataFolder(), "restarted_from_crash.txt");
                 if (crashFile.exists()) {
                     crashFile.delete();
-                } else if (rsc.hexists("heartbeats", serverId)) {
+                } else if (rsc.hexists("heartbeats", id)) {
                     try {
-                        long value = Long.parseLong(rsc.hget("heartbeats", serverId));
+                        long value = Long.parseLong(rsc.hget("heartbeats", id));
                         if (System.currentTimeMillis() < value + 20000) {
                             getLogger().severe("You have launched a possible impostor BungeeCord instance. Another instance is already running.");
                             getLogger().severe("For data consistency reasons, RedisBungee will now disable itself.");
@@ -535,7 +548,7 @@ public final class RedisBungee extends Plugin {
             try (Jedis rsc = pool.getResource()) {
                 try {
                     jpsh = new JedisPubSubHandler();
-                    rsc.subscribe(jpsh, "redisbungee-" + configuration.getServerId(), "redisbungee-allservers", "redisbungee-data");
+                    rsc.subscribe(jpsh, "redisbungee-" + configuration.getId(), "redisbungee-allservers", "redisbungee-data");
                 } catch (Exception e) {
                     // FIXME: Extremely ugly hack
                     // Attempt to unsubscribe this instance and try again.

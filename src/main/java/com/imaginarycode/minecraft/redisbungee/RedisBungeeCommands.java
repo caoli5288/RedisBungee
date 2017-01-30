@@ -297,7 +297,7 @@ class RedisBungeeCommands {
             plugin.getProxy().getScheduler().runAsync(plugin, new Runnable() {
                 @Override
                 public void run() {
-                    String proxy = args.length >= 1 ? args[0] : RedisBungee.getConfiguration().getServerId();
+                    String proxy = args.length >= 1 ? args[0] : RedisBungee.getConfiguration().getId();
                     if (!plugin.getServerIds().contains(proxy)) {
                         sender.sendMessage(new ComponentBuilder(proxy + " is not a valid proxy. See /serverids for valid proxies.").color(ChatColor.RED).create());
                         return;

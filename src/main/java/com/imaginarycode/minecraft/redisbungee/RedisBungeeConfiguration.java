@@ -13,7 +13,7 @@ public class RedisBungeeConfiguration {
     @Getter
     private final JedisPool pool;
     @Getter
-    private final String serverId;
+    private final String id;
     @Getter
     private final boolean registerBungeeCommands;
     @Getter
@@ -21,8 +21,8 @@ public class RedisBungeeConfiguration {
 
     public RedisBungeeConfiguration(JedisPool pool, Configuration configuration) {
         this.pool = pool;
-        this.serverId = configuration.getString("server-id");
-        this.registerBungeeCommands = configuration.getBoolean("register-bungee-commands", true);
+        id = configuration.getString("id");
+        registerBungeeCommands = configuration.getBoolean("register-bungee-commands", true);
 
         List<String> stringified = configuration.getStringList("exempt-ip-addresses");
         ImmutableList.Builder<InetAddress> addressBuilder = ImmutableList.builder();
