@@ -346,13 +346,14 @@ public final class RedisBungee extends Plugin {
                         List<String> lagged = getCurrentServerIds(false, true);
 
                         // Clean up lagged players.
+                        boolean online = getProxy().getConfig().isOnlineMode();
                         for (String s : lagged) {
                             Set<String> laggedPlayers = tmpRsc.smembers("proxy:" + s + ":usersOnline");
                             tmpRsc.del("proxy:" + s + ":usersOnline");
                             if (!laggedPlayers.isEmpty()) {
                                 getLogger().info("Cleaning up lagged proxy " + s + " (" + laggedPlayers.size() + " players)...");
                                 for (String laggedPlayer : laggedPlayers) {
-                                    RedisUtil.cleanUpPlayer(laggedPlayer, tmpRsc);
+                                    RedisUtil.cleanUpPlayer(laggedPlayer, tmpRsc, online);
                                 }
                             }
                         }
@@ -373,7 +374,7 @@ public final class RedisBungee extends Plugin {
                                 }
                             }
                             if (!found) {
-                                RedisUtil.cleanUpPlayer(member, tmpRsc);
+                                RedisUtil.cleanUpPlayer(member, tmpRsc, online);
                                 getLogger().warning("Player found in set that was not found locally and globally: " + member);
                             } else {
                                 tmpRsc.srem("proxy:" + configuration.getId() + ":usersOnline", member);
@@ -415,12 +416,13 @@ public final class RedisBungee extends Plugin {
 
             try (Jedis j = pool.getResource()) {
                 j.hdel("heartbeats", configuration.getId());
+                boolean online = getProxy().getConfig().isOnlineMode();
                 if (j.scard("proxy:" + configuration.getId() + ":usersOnline") > 0) {
                     Set<String> players = j.smembers("proxy:" + configuration.getId() + ":usersOnline");
                     for (String member : players)
-                        RedisUtil.cleanUpPlayer(member, j);
+                        RedisUtil.cleanUpPlayer(member, j, online);
                 }
-                if (!getProxy().getConfig().isOnlineMode()) {
+                if (!online) {
                     String key = "proxy:" + configuration.getId() + ":all";
                     Set<String> l = j.smembers(key);
                     if (!l.isEmpty()) j.srem(key, l.toArray(new String[l.size()]));
