@@ -9,7 +9,6 @@ import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.gson.Gson;
 import com.imaginarycode.minecraft.redisbungee.events.PubSubMessageEvent;
-import com.imaginarycode.minecraft.redisbungee.util.Base64;
 import com.imaginarycode.minecraft.redisbungee.util.IOUtil;
 import com.imaginarycode.minecraft.redisbungee.util.LuaManager;
 import com.imaginarycode.minecraft.redisbungee.util.uuid.NameFetcher;
@@ -21,6 +20,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
+import lombok.val;
 import net.md_5.bungee.api.ProxyServer;
 import net.md_5.bungee.api.connection.ProxiedPlayer;
 import net.md_5.bungee.api.plugin.Plugin;
@@ -46,7 +46,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -116,7 +115,7 @@ public final class RedisBungee extends Plugin {
 
     private List<String> getCurrentServerIds(boolean nag, boolean lagged) {
         try (Jedis jedis = pool.getResource()) {
-            long time = getRedisTime(jedis.time());
+            long time = getRTime(jedis);
             int nagTime = 0;
             if (nag) {
                 nagTime = nagAboutServers.decrementAndGet();
@@ -243,8 +242,8 @@ public final class RedisBungee extends Plugin {
         }
     }
 
-    private long getRedisTime(List<String> timeRes) {
-        return Long.parseLong(timeRes.get(0));
+    private long getRTime(Jedis cli) {
+        return Long.parseLong(cli.time().get(0));
     }
 
     @Override
@@ -267,9 +266,9 @@ public final class RedisBungee extends Plugin {
             throw new RuntimeException("Unable to connect to your Redis server!", e);
         }
         if (pool != null) {
-            try (Jedis j = pool.getResource()) {
+            try (val cli = pool.getResource()) {
                 // This is more portable than INFO <section>
-                String info = j.info();
+                String info = cli.info();
                 for (String s : info.split("\r\n")) {
                     if (s.startsWith("redis_version:")) {
                         String version = s.split(":")[1];
@@ -285,17 +284,17 @@ public final class RedisBungee extends Plugin {
                     }
                 }
 
-                j.hset("heartbeats", configuration.getId(), String.valueOf(System.currentTimeMillis()));
+                cli.hset("heartbeats", configuration.getId(), cli.time().get(0));
 
-                long uuidCacheSize = j.hlen("uuid-cache");
+                long uuidCacheSize = cli.hlen("uuid-cache");
                 if (uuidCacheSize > 750000) {
                     getLogger().info("Looks like you have a really big UUID cache! Run https://www.spigotmc.org/resources/redisbungeecleaner.8505/ as soon as possible.");
                 }
 
                 if (!getProxy().getConfig().isOnlineMode()) {
                     String key = "proxy:" + configuration.getId() + ":all";
-                    Set<String> l = j.smembers(key);
-                    if (!l.isEmpty()) j.srem(key, l.toArray(new String[l.size()]));
+                    Set<String> l = cli.smembers(key);
+                    if (!l.isEmpty()) cli.srem(key, l.toArray(new String[l.size()]));
                 }
             }
             serverIds = getCurrentServerIds(true, false);
@@ -303,9 +302,9 @@ public final class RedisBungee extends Plugin {
             heartbeatTask = service.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
-                    try (Jedis rsc = pool.getResource()) {
-                        long redisTime = getRedisTime(rsc.time());
-                        rsc.hset("heartbeats", configuration.getId(), String.valueOf(redisTime));
+                    try (val cli = pool.getResource()) {
+                        long redisTime = getRTime(cli);
+                        cli.hset("heartbeats", configuration.getId(), String.valueOf(redisTime));
                     } catch (JedisConnectionException e) {
                         // Redis server has disappeared!
                         getLogger().log(Level.SEVERE, "Unable to update heartbeat - did your Redis server go away?", e);
@@ -454,16 +453,6 @@ public final class RedisBungee extends Plugin {
         final int redisPort = configuration.getInt("redis-port", 6379);
         String redisPassword = configuration.getString("redis-password");
 
-        String id = configuration.getString("id", "");
-        if (id.isEmpty()) {
-            Random rand = new Random();
-            byte[] buf = new byte[8];
-            rand.nextBytes(buf);
-            id = new String(Base64.encode(buf));
-            configuration.set("id", id);
-            ConfigurationProvider.getProvider(YamlConfiguration.class).save(configuration, file);
-        }
-
         if (redisPassword != null && (redisPassword.isEmpty() || redisPassword.equals("none"))) {
             redisPassword = null;
         }
@@ -489,16 +478,18 @@ public final class RedisBungee extends Plugin {
             }
 
             // Test the connection
-            try (Jedis rsc = pool.getResource()) {
-                rsc.ping();
+            try (val cli = pool.getResource()) {
+                cli.ping();
+                final String id = localId(cli);
                 // If that worked, now we can check for an existing, alive Bungee:
                 File crashFile = new File(getDataFolder(), "restarted_from_crash.txt");
                 if (crashFile.exists()) {
                     crashFile.delete();
-                } else if (rsc.hexists("heartbeats", id)) {
+                } else if (cli.hexists("heartbeats", id)) {
                     try {
-                        long value = Long.parseLong(rsc.hget("heartbeats", id));
-                        if (System.currentTimeMillis() < value + 20000) {
+                        long value = Long.parseLong(cli.hget("heartbeats", id));
+                        long l = getRTime(cli);
+                        if (l < value + 20) {
                             getLogger().severe("You have launched a possible impostor BungeeCord instance. Another instance is already running.");
                             getLogger().severe("For data consistency reasons, RedisBungee will now disable itself.");
                             getLogger().severe("If this instance is coming up from a crash, create a file in your RedisBungee plugins directory with the name 'restarted_from_crash.txt' and RedisBungee will not perform this check.");
@@ -516,7 +507,7 @@ public final class RedisBungee extends Plugin {
                         httpClient.setDispatcher(dispatcher);
                         NameFetcher.setHttpClient(httpClient);
                         UUIDFetcher.setHttpClient(httpClient);
-                        RedisBungee.configuration = new RedisBungeeConfiguration(RedisBungee.this.getPool(), configuration);
+                        RedisBungee.configuration = new RedisBungeeConfiguration(RedisBungee.this.getPool(), configuration, id);
                         return null;
                     }
                 });
@@ -538,6 +529,12 @@ public final class RedisBungee extends Plugin {
         } else {
             throw new RuntimeException("No redis server specified!");
         }
+    }
+
+    private String localId(Jedis cli) {
+        val inet = cli.getClient().getSocket();
+        val l = getProxy().getConfig().getListeners().iterator().next();
+        return inet.getLocalAddress().getHostAddress() + ":" + l.getHost().getPort();
     }
 
     @NoArgsConstructor(access = AccessLevel.PRIVATE)

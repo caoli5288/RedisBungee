@@ -19,9 +19,9 @@ public class RedisBungeeConfiguration {
     @Getter
     private final List<InetAddress> exemptAddresses;
 
-    public RedisBungeeConfiguration(JedisPool pool, Configuration configuration) {
+    public RedisBungeeConfiguration(JedisPool pool, Configuration configuration, String id) {
+        this.id = id;
         this.pool = pool;
-        id = configuration.getString("id");
         registerBungeeCommands = configuration.getBoolean("register-bungee-commands", true);
 
         List<String> stringified = configuration.getStringList("exempt-ip-addresses");
