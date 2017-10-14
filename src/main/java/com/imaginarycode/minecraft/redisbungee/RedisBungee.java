@@ -534,7 +534,7 @@ public final class RedisBungee extends Plugin {
     private String localId(Jedis cli) {
         val inet = cli.getClient().getSocket();
         val l = getProxy().getConfig().getListeners().iterator().next();
-        return inet.getLocalAddress().getHostAddress() + ":" + l.getHost().getPort();
+        return inet.getLocalAddress().getHostAddress().replace('.', '_') + "_" + l.getHost().getPort();
     }
 
     @NoArgsConstructor(access = AccessLevel.PRIVATE)
