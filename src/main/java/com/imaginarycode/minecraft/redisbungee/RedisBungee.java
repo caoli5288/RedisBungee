@@ -402,6 +402,7 @@ public final class RedisBungee extends Plugin {
             }, 0, 1, TimeUnit.MINUTES);
         }
         getProxy().registerChannel("RedisBungee");
+        PSPEPingHandler.bind(this);
     }
 
     @Override
